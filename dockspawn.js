@@ -854,9 +854,11 @@ dockspawn.DockManager.prototype.invalidate = function()
 
 dockspawn.DockManager.prototype.resize = function(width, height)
 {
+    this.suspendLayout();
     this.element.style.width = width + "px";
     this.element.style.height = height + "px";
     this.context.model.rootNode.container.resize(width, height);
+    this.resumeLayout();
 };
 
 /**
