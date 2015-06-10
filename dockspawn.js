@@ -392,11 +392,6 @@ dockspawn.Dialog.prototype.setTitle = function(title)
     this.panel.setTitle(title);
 };
 
-dockspawn.Dialog.prototype.setTitleIcon = function(iconName)
-{
-    this.panel.setTitleIcon(iconName);
-};
-
 dockspawn.Dialog.prototype.bringToFront = function()
 {
     this.elementDialog.style.zIndex = this.zIndexCounter++;
@@ -2222,7 +2217,6 @@ dockspawn.PanelContainer = function(elementContent, dockManager, title)
     this.dockManager = dockManager;
     this.title = title;
     this.containerType = "panel";
-    this.iconName = "icon-circle-arrow-right";
     this.minimumAllowedChildNodes = 0;
     this._floatingDialog = undefined;
     this._initialize();
@@ -2309,9 +2303,7 @@ dockspawn.PanelContainer.prototype._initialize = function()
 
     // Extract the title from the content element's attribute
     var contentTitle = this.elementContent.getAttribute('caption');
-    var contentIcon = this.elementContent.getAttribute('icon');
     if (contentTitle != null) this.title = contentTitle;
-    if (contentIcon != null) this.iconName = contentIcon;
     this._updateTitle();
 
     this.undockInitiator = new dockspawn.UndockInitiator(this.elementTitle, this.performUndockToDialog.bind(this));
@@ -2326,6 +2318,8 @@ dockspawn.PanelContainer.prototype.destroy = function()
         this.closeButtonClickedHandler.cancel();
         delete this.closeButtonClickedHandler;
     }
+    if (this.onDestroyed)
+        this.onDestroyed();
 };
 
 /**
@@ -2410,15 +2404,9 @@ dockspawn.PanelContainer.prototype.setTitle = function(title)
         this.onTitleChanged(this, title);
 };
 
-dockspawn.PanelContainer.prototype.setTitleIcon = function(iconName)
-{
-    this.iconName = iconName;
-    this._updateTitle();
-};
-
 dockspawn.PanelContainer.prototype._updateTitle = function()
 {
-    this.elementTitleText.innerHTML = '<i class="' + this.iconName + '"></i> ' + this.title;
+    this.elementTitleText.innerHTML = this.title;
 };
 
 dockspawn.PanelContainer.prototype.getRawTitle = function()
