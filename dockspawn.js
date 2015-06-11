@@ -167,9 +167,22 @@ dockspawn.TabHost.prototype._createDefaultTabPage = function(tabHost, container)
 dockspawn.TabHost.prototype.setActiveTab = function(container)
 {
     var self = this;
-    this.pages.forEach(function(page)
+    this.pages.forEach(function(page, index)
     {
         if (page.container === container)
+        {
+            self.onTabPageSelected(page);
+            return;
+        }
+    });
+};
+
+dockspawn.TabHost.prototype.setActiveTabByIndex = function(index)
+{
+    var self = this;
+    this.pages.forEach(function(page, pageIndex)
+    {
+        if (index === pageIndex)
         {
             self.onTabPageSelected(page);
             return;
@@ -202,6 +215,7 @@ dockspawn.TabHost.prototype.performLayout = function(children)
 
     var oldActiveTab = this.activeTab;
     delete this.activeTab;
+    this.activeTabIndex = -1;
 
     var childPanels = children.filter(function(child)
     {
@@ -240,9 +254,13 @@ dockspawn.TabHost.prototype._setTabHandlesVisible = function(visible)
 dockspawn.TabHost.prototype.onTabPageSelected = function(page)
 {
     this.activeTab = page;
-    this.pages.forEach(function(tabPage)
+    this.activeTabIndex = -1;
+    var self = this;
+    this.pages.forEach(function(tabPage, index)
     {
         var selected = (tabPage === page);
+        if (selected)
+            self.activeTabIndex = index; 
         tabPage.setSelected(selected);
     });
 
@@ -810,29 +828,30 @@ dockspawn.Exception.prototype.toString = function()
  * Initially the document manager takes up the central space and acts as the root node
  */
 
- dockspawn.DockManager = function(element)
+ dockspawn.DockManager = function(element, contentBuilder)
 {
     if (element === undefined)
         throw new dockspawn.Exception("Invalid Dock Manager element provided");
 
     this.element = element;
-    this.context = this.dockWheel = this.layoutEngine = this.mouseMoveHandler = undefined;
+    this.contentBuilder = contentBuilder;
+    this.dockWheel = this.layoutEngine = this.mouseMoveHandler = undefined;
     this.layoutEventListeners = [];
 };
 
 dockspawn.DockManager.prototype.initialize = function()
 {
-    this.context = new dockspawn.DockManagerContext(this);
-    var documentNode = new dockspawn.DockNode(this.context.documentManagerView);
-    this.context.model.rootNode = documentNode;
-    this.context.model.documentManagerNode = documentNode;
-    this.setRootNode(this.context.model.rootNode);
+    this.model = new dockspawn.DockModel();
+    var dmc = new dockspawn.DocumentManagerContainer(this.dockManager);
+    this.model.documentNode = new dockspawn.DockNode(dmc);
+    
+    this.setRootNode(this.model.documentNode);
     // Resize the layout
     this.resize(this.element.clientWidth, this.element.clientHeight);
     this.dockWheel = new dockspawn.DockWheel(this);
     this.layoutEngine = new dockspawn.DockLayoutEngine(this);
 
-    this.rebuildLayout(this.context.model.rootNode);
+    this.rebuildLayout(this.model.rootNode);
 };
 
 dockspawn.DockManager.prototype.rebuildLayout = function(node)
@@ -852,7 +871,7 @@ dockspawn.DockManager.prototype.resize = function(width, height)
     this.suspendLayout();
     this.element.style.width = width + "px";
     this.element.style.height = height + "px";
-    this.context.model.rootNode.container.resize(width, height);
+    this.model.rootNode.container.resize(width, height);
     this.resumeLayout();
 };
 
@@ -861,8 +880,8 @@ dockspawn.DockManager.prototype.resize = function(width, height)
  */
 dockspawn.DockManager.prototype.setModel = function(model)
 {
-    removeNode(this.context.documentManagerView.containerElement);
-    this.context.model = model;
+    removeNode(this.model.rootNode.container.containerElement);
+    this.model = model;
     this.setRootNode(model.rootNode);
 
     this.rebuildLayout(model.rootNode);
@@ -871,7 +890,7 @@ dockspawn.DockManager.prototype.setModel = function(model)
 
 dockspawn.DockManager.prototype.setRootNode = function(node)
 {
-    if (this.context.model.rootNode)
+    if (this.model.rootNode)
     {
         // detach it from the dock manager's base element
 //      context.model.rootNode.detachFromParent();
@@ -879,7 +898,7 @@ dockspawn.DockManager.prototype.setRootNode = function(node)
 
     // Attach the new node to the dock manager's base element and set as root node
     node.detachFromParent();
-    this.context.model.rootNode = node;
+    this.model.rootNode = node;
     this.element.appendChild(node.container.containerElement);
 };
 
@@ -923,7 +942,7 @@ dockspawn.DockManager.prototype.onMouseMoved = function(e)
 dockspawn.DockManager.prototype._findNodeOnPoint = function(x, y)
 {
     var stack = [];
-    stack.push(this.context.model.rootNode);
+    stack.push(this.model.rootNode);
     var bestMatch;
 
     while (stack.length > 0)
@@ -1022,7 +1041,6 @@ dockspawn.DockManager.prototype._requestDockContainer = function(referenceNode, 
     {
         var panel = container;
         panel.prepareForDocking();
-        removeNode(panel.elementPanel);
     }
     layoutDockFunction(referenceNode, newNode);
 
@@ -1033,7 +1051,7 @@ dockspawn.DockManager.prototype._requestDockContainer = function(referenceNode, 
         splitter.setContainerRatio(container, ratio);
     }
 
-    this.rebuildLayout(this.context.model.rootNode);
+    this.rebuildLayout(this.model.rootNode);
     this.invalidate();
     return newNode;
 };
@@ -1088,10 +1106,10 @@ dockspawn.DockManager.prototype.requestRemove = function(container)
 /** Finds the node that owns the specified [container] */
 dockspawn.DockManager.prototype._findNodeFromContainer = function(container)
 {
-    //this.context.model.rootNode.debug_DumpTree();
+    //this.model.rootNode.debug_DumpTree();
 
     var stack = [];
-    stack.push(this.context.model.rootNode);
+    stack.push(this.model.rootNode);
 
     while (stack.length > 0)
     {
@@ -1154,14 +1172,13 @@ dockspawn.DockManager.prototype.notifyOnUnDock = function(dockNode)
 dockspawn.DockManager.prototype.saveState = function()
 {
     var serializer = new dockspawn.DockGraphSerializer();
-    return serializer.serialize(this.context.model);
+    return serializer.serialize(this.model);
 };
 
 dockspawn.DockManager.prototype.loadState = function(json)
 {
     var deserializer = new dockspawn.DockGraphDeserializer(this);
-    this.context.model = deserializer.deserialize(json);
-    this.setModel(this.context.model);
+    this.setModel(deserializer.deserialize(json));
 };
 
 //typedef void LayoutEngineDockFunction(dockspawn.DockNode referenceNode, dockspawn.DockNode newNode);
@@ -1275,7 +1292,7 @@ dockspawn.DockLayoutEngine.prototype._performDock = function(referenceNode, newN
     }
 
     // Check if reference node is root node
-    var model = this.dockManager.context.model;
+    var model = this.dockManager.model;
     if (referenceNode === model.rootNode)
     {
         var compositeContainer = this._createDockContainer(direction, newNode, referenceNode);
@@ -1294,7 +1311,7 @@ dockspawn.DockLayoutEngine.prototype._performDock = function(referenceNode, newN
 
         // Attach the root node to the dock manager's DOM
 		this.dockManager.setRootNode(compositeNode);
-        this.dockManager.rebuildLayout(this.dockManager.context.model.rootNode);
+        this.dockManager.rebuildLayout(this.dockManager.model.rootNode);
         compositeNode.container.setActiveChild(newNode.container);
         return;
     }
@@ -1468,19 +1485,14 @@ dockspawn.DockLayoutEngine.prototype._getVaringDimension = function(container, d
         return container.width;
     return 0;
 };
-dockspawn.DockManagerContext = function(dockManager)
-{
-    this.dockManager = dockManager;
-    this.model = new dockspawn.DockModel();
-    this.documentManagerView = new dockspawn.DocumentManagerContainer(this.dockManager);
-};
+
 /**
  * The Dock Model contains the tree hierarchy that represents the state of the
  * panel placement within the dock manager.
  */
 dockspawn.DockModel = function()
 {
-    this.rootNode = this.documentManagerNode = undefined;
+    this.rootNode = undefined;
 };
 
 dockspawn.DockNode = function(container)
@@ -1693,7 +1705,7 @@ dockspawn.DockWheel.prototype.onMouseOver = function(wheelItem, e)
         return;
 
     // Display the preview panel to show where the panel would be docked
-    var rootNode = this.dockManager.context.model.rootNode;
+    var rootNode = this.dockManager.model.rootNode;
     var bounds;
     if (wheelItem.id == "top") {
         bounds = this.dockManager.layoutEngine.getDockBounds(this.activeNode, this.activeDialog.panel, "vertical", true);
@@ -1772,13 +1784,13 @@ dockspawn.DockWheel.prototype._handleDockRequest = function(wheelItem, dialog)
     } else if (wheelItem.id == "fill") {
         this.dockManager.dockDialogFill(this.activeNode, dialog);
     } else if (wheelItem.id == "left-s") {
-        this.dockManager.dockDialogLeft(this.dockManager.context.model.rootNode, dialog);
+        this.dockManager.dockDialogLeft(this.dockManager.model.rootNode, dialog);
     } else if (wheelItem.id == "right-s") {
-        this.dockManager.dockDialogRight(this.dockManager.context.model.rootNode, dialog);
+        this.dockManager.dockDialogRight(this.dockManager.model.rootNode, dialog);
     } else if (wheelItem.id == "top-s") {
-        this.dockManager.dockDialogUp(this.dockManager.context.model.rootNode, dialog);
+        this.dockManager.dockDialogUp(this.dockManager.model.rootNode, dialog);
     } else if (wheelItem.id == "down-s") {
-        this.dockManager.dockDialogDown(this.dockManager.context.model.rootNode, dialog);
+        this.dockManager.dockDialogDown(this.dockManager.model.rootNode, dialog);
     }
 };
 
@@ -1860,21 +1872,23 @@ dockspawn.FillDockContainer.prototype.saveState = function(state)
 {
     state.width = this.width;
     state.height = this.height;
+    state.activeTabIndex = this.tabHost.activeTabIndex;
 };
 
 dockspawn.FillDockContainer.prototype.loadState = function(state)
 {
     this.width = state.width;
     this.height = state.height;
+    this.tabHost.setActiveTabByIndex(state.activeTabIndex); 
 };
 
 Object.defineProperty(dockspawn.FillDockContainer.prototype, "width", {
-    get: function() { return this.element.clientWidth; },
+    get: function() { return getPixels(this.element.style.width); },
     set: function(value) { this.element.style.width = value + "px" }
 });
 
 Object.defineProperty(dockspawn.FillDockContainer.prototype, "height", {
-    get: function() { return this.element.clientHeight; },
+    get: function() { return getPixels(this.element.style.height); },
     set: function(value) { this.element.style.height = value + "px" }
 });
 
@@ -1929,6 +1943,7 @@ dockspawn.DocumentTabPage = function(host, container)
         // This enables the panel's frame (title bar etc) to be hidden
         // inside the tab page
         removeNode(this.containerElement);
+        removeNode(this.panel.elementPanel);
     }
 };
 dockspawn.DocumentTabPage.prototype = new dockspawn.TabPage();
@@ -2100,8 +2115,8 @@ dockspawn.SplitterPanel.prototype.resize = function(width, height)
     {
         var child = this.childContainers[i];
         var original = this.stackedVertical ?
-            child.containerElement.clientHeight :
-            child.containerElement.clientWidth;
+            child.height :
+            child.width;
 
         var newSize = Math.floor(original * scaleMultiplier);
         updatedTotalChildPanelSize += newSize;
@@ -2209,11 +2224,11 @@ dockspawn.HorizontalDockContainer.prototype.constructor = dockspawn.HorizontalDo
 /**
  * This dock container wraps the specified element on a panel frame with a title bar and close button
  */
-dockspawn.PanelContainer = function(elementContent, dockManager, title)
+dockspawn.PanelContainer = function(contentData, dockManager, title)
 {
     if (!title)
         title = "Panel";
-    this.elementContent = elementContent;
+    this.contentData = contentData;
     this.dockManager = dockManager;
     this.title = title;
     this.containerType = "panel";
@@ -2234,27 +2249,18 @@ Object.defineProperty(dockspawn.PanelContainer.prototype, "floatingDialog", {
 
 dockspawn.PanelContainer.loadFromState = function(state, dockManager)
 {
-    var elementName = state.element;
-    var elementContent = document.getElementById(elementName);
-    var ret = new dockspawn.PanelContainer(elementContent, dockManager);
-    ret.elementContent = elementContent;
-    ret._initialize();
-    ret.loadState(state);
+    var ret = new dockspawn.PanelContainer(state.data, dockManager);
+//     ret.width = state.width;
+//     ret.height = state.height; 
+    ret.resize(state.width, state.height);
     return ret;
 };
 
 dockspawn.PanelContainer.prototype.saveState = function(state)
 {
-    state.element = this.elementContent.id;
+    state.data = this.contentData;
     state.width = this.width;
     state.height = this.height;
-};
-
-dockspawn.PanelContainer.prototype.loadState = function(state)
-{
-    this.width = state.width;
-    this.height = state.height;
-    this.resize(this.width, this.height);
 };
 
 dockspawn.PanelContainer.prototype.setActiveChild = function(child)
@@ -2287,24 +2293,23 @@ dockspawn.PanelContainer.prototype._initialize = function()
     this.elementTitleText.classList.add("panel-titlebar-text");
     this.elementContentHost.classList.add("panel-content");
 
+    this.elementContent = this.dockManager.contentBuilder(this.contentData, this);
     // set the size of the dialog elements based on the panel's size
     var panelWidth = this.elementContent.clientWidth;
     var panelHeight = this.elementContent.clientHeight;
     var titleHeight = this.elementTitle.clientHeight;
     this._setPanelDimensions(panelWidth, panelHeight + titleHeight);
 
-    // Add the panel to the body
-    document.body.appendChild(this.elementPanel);
-
     this.closeButtonClickedHandler = new dockspawn.EventHandler(this.elementButtonClose, 'click', this.onCloseButtonClicked.bind(this));
 
     removeNode(this.elementContent);
     this.elementContentHost.appendChild(this.elementContent);
-
-    // Extract the title from the content element's attribute
-    var contentTitle = this.elementContent.getAttribute('caption');
-    if (contentTitle != null) this.title = contentTitle;
     this._updateTitle();
+
+    // Add the panel to the body
+    document.body.appendChild(this.elementPanel);
+    if (this.onCreated)
+        this.onCreated();
 
     this.undockInitiator = new dockspawn.UndockInitiator(this.elementTitle, this.performUndockToDialog.bind(this));
     delete this.floatingDialog;
@@ -2406,7 +2411,8 @@ dockspawn.PanelContainer.prototype.setTitle = function(title)
 
 dockspawn.PanelContainer.prototype._updateTitle = function()
 {
-    this.elementTitleText.innerHTML = this.title;
+    if (this.elementTitleText != null)
+        this.elementTitleText.innerHTML = this.title;
 };
 
 dockspawn.PanelContainer.prototype.getRawTitle = function()
@@ -2554,9 +2560,10 @@ dockspawn.DockGraphDeserializer = function(dockManager)
 
 dockspawn.DockGraphDeserializer.prototype.deserialize = function(json)
 {
-    var graphInfo = JSON.parse(_json);
+    var graphInfo = JSON.parse(json);
     var model = new dockspawn.DockModel();
     model.rootNode = this._buildGraph(graphInfo);
+    model.documentNode = this.documentNode;
     return model;
 };
 
@@ -2571,30 +2578,23 @@ dockspawn.DockGraphDeserializer.prototype._buildGraph = function(nodeInfo)
         children.push(childNode);
     });
 
-    // Build the container owned by this node
-    var container = this._createContainer(nodeInfo, children);
-
     // Build the node for this container and attach it's children
-    var node = new dockspawn.DockNode(container);
-    node.children = children;
-    node.children.forEach(function(childNode) { childNode.parent = node; });
-
-    return node;
+    return this._createNode(nodeInfo, children);
 };
 
-dockspawn.DockGraphDeserializer.prototype._createContainer = function(nodeInfo, children)
+dockspawn.DockGraphDeserializer.prototype._createNode = function(nodeInfo, children)
 {
     var containerType = nodeInfo.containerType;
     var containerState = nodeInfo.state;
-    var container;
+
+    if (containerType == "panel")
+        return new dockspawn.DockNode(new dockspawn.PanelContainer.loadFromState(containerState, this.dockManager));
 
     var childContainers = [];
     children.forEach(function(childNode) { childContainers.push(childNode.container); });
-    childContainers = [];
-
-    if (containerType == "panel")
-        container = new dockspawn.PanelContainer.loadFromState(containerState, this.dockManager);
-    else if (containerType == "horizontal")
+    
+    var container;
+    if (containerType == "horizontal")
         container = new dockspawn.HorizontalDockContainer(this.dockManager, childContainers);
     else if (containerType == "vertical")
         container = new dockspawn.VerticalDockContainer(this.dockManager, childContainers);
@@ -2606,17 +2606,27 @@ dockspawn.DockGraphDeserializer.prototype._createContainer = function(nodeInfo, 
         // called document_manager and have to resort to this hack. use RTTI in layout engine
         var typeDocumentManager = containerState.documentManager;
         if (typeDocumentManager)
-            container = new DocumentManagerContainer(this.dockManager);
+            container = new dockspawn.DocumentManagerContainer(this.dockManager);
         else
             container = new dockspawn.FillDockContainer(this.dockManager);
     }
     else
         throw new dockspawn.Exception("Cannot create dock container of unknown type: " + containerType);
 
+    var node = new dockspawn.DockNode(container);
+
+    if (container instanceof dockspawn.DocumentManagerContainer)
+        this.documentNode = node; // HACK
+
+
+    node.children = children;
+    node.children.forEach(function(childNode) { childNode.parent = node; });
+
     // Restore the state of the container
-    container.loadState(containerState);
     container.performLayout(childContainers);
-    return container;
+    container.loadState(containerState);
+    
+    return node;
 };
 /**
  * The serializer saves / loads the state of the dock layout hierarchy
@@ -2638,7 +2648,7 @@ dockspawn.DockGraphSerializer.prototype._buildGraphInfo = function(node)
 
     var childrenInfo = [];
     var self = this;
-    node.childNodes.forEach(function(childNode) {
+    node.children.forEach(function(childNode) {
         childrenInfo.push(self._buildGraphInfo(childNode));
     });
 
